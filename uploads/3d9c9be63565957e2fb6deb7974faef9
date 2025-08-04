@@ -1,0 +1,3 @@
+title,image,description,reviews,category,price,location,hot,featured,newArrival,bidProduct,bidtimer
+Vintage Watch,"https://example.com/watch1.jpg,https://example.com/watch2.jpg",A classic vintage watch.,Excellent condition.,men,350.00,London,true,true,false,true,2025-08-04T20:00:00Z
+Designer Scarf,https://example.com/scarf1.jpg,A beautiful silk scarf.,Very popular.,women,89.99,Paris,true,false,true,false,

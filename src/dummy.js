@@ -1,13 +1,12 @@
-  import { v2 as cloudinary } from "cloudinary";
-  import Product from "../model/product.model.js";
-  import { errorHandler } from "../utils/errorHandler.js";
-  import fs from "fs";
-  import path from "path"
-  import { fileURLToPath } from 'url';
-  import { dirname } from 'path';
-  import csv from 'csv-parser';
-  import { promisify } from "util";
-
+import { v2 as cloudinary } from "cloudinary";
+import Product from "../model/product.model.js";
+import { errorHandler } from "../utils/errorHandler.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import csv from 'csv-parser';
+import { promisify } from 'util';
 
 // Promisify the fs.unlink function for better async handling
 const unlinkAsync = promisify(fs.unlink);
@@ -15,9 +14,9 @@ const unlinkAsync = promisify(fs.unlink);
 // Define __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-  
 
-  const createProduct = async (req, res, next) => {
+// SECTION - Create Product
+const createProduct = async (req, res, next) => {
   try {
     const {
       title,
@@ -29,16 +28,15 @@ const __dirname = dirname(__filename);
       hot,
       featured,
       newArrival,
-      bidProduct,      // 👈 input from client (true/false)
-      bidtimer         // 👈 input from client if bidProduct is true
+      bidProduct,
+      bidtimer,
     } = req.body;
 
-    // Handle multiple image uploads
-    const imagea = req.files.image1 && req.files.image1[0];
-    const imageb = req.files.image2 && req.files.image2[0];
-    const imagec = req.files.image3 && req.files.image3[0];
-    const imaged = req.files.image4 && req.files.image4[0];
-    const imagee = req.files.image5 && req.files.image5[0];
+    const imagea = req.files?.image1?.[0];
+    const imageb = req.files?.image2?.[0];
+    const imagec = req.files?.image3?.[0];
+    const imaged = req.files?.image4?.[0];
+    const imagee = req.files?.image5?.[0];
 
     const images = [imagea, imageb, imagec, imaged, imagee].filter(Boolean);
 
@@ -52,7 +50,6 @@ const __dirname = dirname(__filename);
       })
     );
 
-    // Construct product data
     const productData = {
       userId: req.userId,
       title,
@@ -65,17 +62,15 @@ const __dirname = dirname(__filename);
       hot,
       featured,
       newArrival,
-      bidProduct: bidProduct === "true" || bidProduct === true, // ensure boolean
+      bidProduct: bidProduct === "true" || bidProduct === true,
       date: Date.now(),
     };
 
-    // If it's a bid product, add timer
     if (productData.bidProduct) {
       if (!bidtimer) {
         return next(errorHandler(400, "Bid timer is required for bid products."));
       }
-
-      productData.bidtimer = new Date(bidtimer); // Should be ISO string from frontend
+      productData.bidtimer = new Date(bidtimer);
       productData.productUnable = false;
     }
 
@@ -88,13 +83,12 @@ const __dirname = dirname(__filename);
       product,
     });
   } catch (error) {
-    console.log("Error in Create Product", error);
+    console.error("Error in Create Product", error);
     next(errorHandler(500, "Failed to create product"));
   }
 };
 
 
-//SECTION = Create Product By CSV
 // SECTION - Create Product By CSV
 const createProductByCSV = async (req, res, next) => {
   if (!req.file) {
@@ -117,7 +111,6 @@ const createProductByCSV = async (req, res, next) => {
           userId: userId,
           title: data.title,
           image: data.image ? data.image.split(',').map(url => url.trim()) : [],
-          category: data.category,
           description: data.description,
           reviews: data.reviews,
           location: data.location,
@@ -175,69 +168,60 @@ const createProductByCSV = async (req, res, next) => {
   }
 };
 
-  //SECTION -  GET PRODUCTS
-  const getProduct = async (req, res, next) => {
-    try {
-      const startIndex = parseInt(req.query.startIndex) || 0;
-      const limit = parseInt(req.query.limit) || 9;
-      const sortDirection =  req.query.order === "asc" ? 1 : -1;
 
-      const products = await Product.find({
-          ...(req.query.userId && {userId: req.query.userId}),
-          ...(req.query.productId && {_id: req.query.productId}),
-      }).sort({updatedAt: sortDirection}).skip(startIndex).limit(limit);
+// SECTION - GET PRODUCTS
+const getProduct = async (req, res, next) => {
+  try {
+    const startIndex = parseInt(req.query.startIndex) || 0;
+    const limit = parseInt(req.query.limit) || 9;
+    const sortDirection = req.query.order === "asc" ? 1 : -1;
 
-      const totalProduct = await Product.countDocuments();
+    const products = await Product.find({
+      ...(req.query.userId && { userId: req.query.userId }),
+      ...(req.query.productId && { _id: req.query.productId }),
+    }).sort({ updatedAt: sortDirection }).skip(startIndex).limit(limit);
 
-      //Current Time 
-      const now = new Date();
+    const totalProduct = await Product.countDocuments();
 
+    const now = new Date();
+    const oneMonthAgo = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      now.getDate()
+    );
 
-      //Date for month ag0
-      const oneMonthAgo = new Date(
-          now.getFullYear(),
-          now.getMonth() - 1,
-          now.getDate()
-      );
+    const lastMonthAgo = await Product.countDocuments({
+      createdAt: { $gte: oneMonthAgo },
+    });
 
-      //FOR LAST MONTH AGO
-      const lastMonthAgo = await Product.countDocuments({
-          createdAt: {$gte: oneMonthAgo},
-      })
+    // --- Duplicate `res` call removed here ---
+    res.status(200).json({
+      products,
+      totalProduct,
+      lastMonthAgo
+    });
+  } catch (error) {
+    console.error("Error in get products ", error);
+    next(error); // Passing the error to the next middleware
+  }
+};
 
-      res.status(200).json({
-          products,
-          totalProduct,
-          lastMonthAgo
-      })
+// SECTION - GET SINGLE PRODUCTS
+const getAllProducts = async (req, res, next) => {
+  try {
+    const products = await Product.find({});
 
+    res.status(200).json({
+      message: "Fetched Product successfully",
+      products
+    });
+  } catch (error) {
+    console.error("Error in getProduct ", error);
+    next(error);
+  }
+};
 
-      res.status(200).json(products);
-    } catch (error) {
-      console.log("Error in get products ", error);
-      next();
-    }
-  };
-
-  //SECTION -  GET SINGLE PRODUCTs
-  const getAllProducts = async (req, res, next) => {
-    try {
-      const products = await Product.find({});
-
-
-      res.status(200).json({
-        message: "Fetched Product successfully",
-        products
-      });
-    } catch (error) {
-      console.log("Error in getProduct ", error);
-      next();
-    }
-  };
-
-
-
-  
+// SECTION - Update Product
 const updateProduct = async (req, res, next) => {
   try {
     const {
@@ -250,8 +234,8 @@ const updateProduct = async (req, res, next) => {
       hot,
       featured,
       newArrival,
-      bidProduct,     // 👈 updated or added from frontend
-      bidtimer        // 👈 updated or added if bidProduct is true
+      bidProduct,
+      bidtimer,
     } = req.body;
 
     const existingProduct = await Product.findById(req.params.productId);
@@ -259,7 +243,6 @@ const updateProduct = async (req, res, next) => {
       return next(errorHandler(403, "Product not found"));
     }
 
-    // Upload updated images
     const uploadedImages = [
       req.files?.image1?.[0],
       req.files?.image2?.[0],
@@ -286,7 +269,6 @@ const updateProduct = async (req, res, next) => {
       }
     }
 
-    // Prepare update fields
     const updateData = {
       title: title || existingProduct.title,
       image: finalImageUrls,
@@ -301,7 +283,6 @@ const updateProduct = async (req, res, next) => {
       date: Date.now(),
     };
 
-    // If bidding enabled
     if (bidProduct === "true" || bidProduct === true) {
       if (!bidtimer) {
         return next(errorHandler(400, "Please provide a bid timer"));
@@ -310,7 +291,6 @@ const updateProduct = async (req, res, next) => {
       updateData.bidtimer = new Date(bidtimer);
       updateData.productUnable = false;
     } else if (bidProduct === "false" || bidProduct === false) {
-      // Clear bidding-related fields
       updateData.bidProduct = false;
       updateData.bidtimer = null;
       updateData.productUnable = false;
@@ -333,84 +313,75 @@ const updateProduct = async (req, res, next) => {
   }
 };
 
-
-
-
-
-
-
-  const deleteProduct = async (req, res, next) => {
-    try {
-      const product = await Product.findByIdAndDelete(req.params.productId);
-      res.json({
-        success: true,
-        messgae: "Product deleted",
-      });
-    } catch (error) {
-      console.log("Error in product delete", error);
-      next();
-    }
-  };
-
-  //SECTION - WISHLIST
-  const toggleWishList = async (req,res,next) => {
-    try {
-      const { productId } = req.params;
-      const userId = req.params.userId;
-
-      const product = await Product.findById(productId);
-      if(!product){
-        return next(errorHandler(403, "Product not found"))
-      }
-
-      const alreadyInWishList = await product.wishList.includes(userId);
-      const total = await Product.countDocuments({wishList: userId});
-      if(alreadyInWishList){
-        //REMOVE FROM WISHLIST
-        product.wishList.pull(userId);
-      }else{
-        //ADD IN WISHLIST
-        product.wishList.push(userId);
-      }
-
-      await product.save();
-
-      res.status(200).json({
-        message: alreadyInWishList ? "Removed from wishlist" : "Add in wishlist",
-        product,
-        total
-      })
-    } catch (error) {
-      console.log("Error in wishlist ",error);
-      next();
-    }
+// SECTION - Delete Product
+const deleteProduct = async (req, res, next) => {
+  try {
+    await Product.findByIdAndDelete(req.params.productId);
+    res.json({
+      success: true,
+      message: "Product deleted",
+    });
+  } catch (error) {
+    console.error("Error in product delete", error);
+    next(error);
   }
+};
 
+// SECTION - Wishlist
+const toggleWishList = async (req, res, next) => {
+  try {
+    const { productId } = req.params;
+    const userId = req.params.userId;
 
-  const getWishlistsProducts =  async (req,res,next) => {
-    try {
-      const products = await Product.find({ wishList: req.params.userId});
-
-      res.status(200).json({
-          success: true,
-          message: "Wishlist product fetch",
-          products
-      })
-    } catch (error) {
-      console.log("Error in get wishlist products " ,error);
-      next();
+    const product = await Product.findById(productId);
+    if (!product) {
+      return next(errorHandler(403, "Product not found"));
     }
+
+    const alreadyInWishList = product.wishList.includes(userId);
+    const total = await Product.countDocuments({ wishList: userId });
+
+    if (alreadyInWishList) {
+      product.wishList.pull(userId);
+    } else {
+      product.wishList.push(userId);
+    }
+
+    await product.save();
+
+    res.status(200).json({
+      message: alreadyInWishList ? "Removed from wishlist" : "Add in wishlist",
+      product,
+      total
+    });
+  } catch (error) {
+    console.error("Error in wishlist ", error);
+    next(error);
   }
+};
 
+const getWishlistsProducts = async (req, res, next) => {
+  try {
+    const products = await Product.find({ wishList: req.params.userId });
 
-  
-  export default {
-    createProduct,
-    getProduct,
-    getAllProducts,
-     updateProduct,
-    deleteProduct,
-    toggleWishList,
-    getWishlistsProducts,
-    createProductByCSV
-  };
+    res.status(200).json({
+      success: true,
+      message: "Wishlist product fetch",
+      products
+    });
+  } catch (error) {
+    console.error("Error in get wishlist products ", error);
+    next(error);
+  }
+};
+
+export {
+  createProduct,
+  getProduct,
+  getAllProducts,
+  updateProduct,
+  deleteProduct,
+  toggleWishList,
+  getWishlistsProducts,
+  createProductByCSV
+};
