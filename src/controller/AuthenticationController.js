@@ -14,6 +14,58 @@ const verifyCodeEmailTemp = fs.readFileSync(
   "utf-8"
 );
 
+// const signUpController = async (req, res, next) => {
+//   try {
+//     const { fullName, email, password } = req.body;
+
+//     if (
+//       !fullName ||
+//       !email ||
+//       !password ||
+//       fullName === "" ||
+//       email === "" ||
+//       password === ""
+//     ) {
+//       return next(errorHandler(404, "All fields are required"));
+//     }
+
+//     const user = await User.findOne({ email });
+
+//     if (user) {
+//       return next(errorHandler(401, "User is already exist"));
+//     }
+
+//     const hashedPassword = bcrypt.hashSync(password,10);
+
+//     const newUser = new User({
+//       fullName,
+//       email,
+//       password: hashedPassword,
+//     });
+
+//     await newUser.save();
+
+//     const token = jwt.sign(
+//       { userId: newUser._id, isAdmin: newUser.isAdmin },
+//       process.env.JWT_SECRET
+//     );
+
+//     res.status(201).json( {
+//       token,
+//       user: {
+//         _id: newUser._id,
+//       fullName: fullName,
+//       email: email,
+//       isAdmin: newUser.isAdmin,
+//       profilePhoto: newUser.profilePhoto ? newUser.profilePhoto : null,
+//   }});
+//   } catch (error) {
+//     console.log(error);
+//     next();
+//   }
+// };
+
+// New controller for user signup with email verification
 const signUpController = async (req, res, next) => {
   try {
     const { fullName, email, password } = req.body;
@@ -32,36 +84,153 @@ const signUpController = async (req, res, next) => {
     const user = await User.findOne({ email });
 
     if (user) {
-      return next(errorHandler(401, "User is already exist"));
+      // Yahan tabdeeli ki gayi hai
+      // Agar user pehle se mojood hai, to check karein ke woh verified hai ya nahi
+      if (user.isVerified) {
+        return next(errorHandler(401, "User is already exist"));
+      } else {
+        // Agar user exist karta hai lekin verified nahi hai, to usay ek naya OTP bhej dein
+        const otp = user.generateOtp();
+        await user.save();
+        
+        // Email bhejne ka function
+        await sendEmail({
+          email: email,
+          subject: "Verify Your Email",
+          message: verifyCodeEmailTemp
+            .replace("{{user.name}}", user.fullName)
+            .replace("{{otp}}", otp),
+          attachments: [],
+        });
+        
+        return res.status(200).json({
+          message: "User exists but not verified. A new OTP has been sent.",
+          email,
+        });
+      }
     }
 
-    const hashedPassword = bcrypt.hashSync(password,10);
-
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    
+    // Naya user banate waqt isVerified ko false set karein
     const newUser = new User({
       fullName,
       email,
       password: hashedPassword,
+      isVerified: false,
     });
 
+    const otp = newUser.generateOtp();
     await newUser.save();
 
+    await sendEmail({
+      email: email,
+      subject: "Verify Your Email",
+      message: verifyCodeEmailTemp
+        .replace("{{user.name}}", newUser.fullName)
+        .replace("{{otp}}", otp),
+      attachments: [],
+    });
+
+    res.status(201).json({
+      message: "User created. OTP sent to email for verification.",
+      email: newUser.email,
+    });
+  } catch (error) {
+    console.error("Error in signUpController:", error);
+    next(errorHandler(500, "Internal Server Error"));
+  }
+};
+
+// New controller to verify the OTP for signup
+const verifySignup = async (req, res, next) => {
+  try {
+    const { email, otpCode } = req.body;
+
+    if (!email || !otpCode) {
+      return next(errorHandler(400, "Email and OTP are required"));
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return next(errorHandler(404, "User not found"));
+    }
+
+    if (user.isVerified) {
+      return next(errorHandler(400, "User is already verified"));
+    }
+
+    const isMatch = user.otpCode === otpCode;
+
+    if (!isMatch || user.otpCodeExpiry < Date.now()) {
+      return next(errorHandler(400, "Invalid or expired OTP"));
+    }
+
+    // OTP sahi hone par user ko verified set karein aur OTP details hata dein
+    user.isVerified = true;
+    user.otpCode = undefined;
+    user.otpCodeExpiry = undefined;
+    await user.save();
+
+    // Verification ke baad login token generate karein
     const token = jwt.sign(
-      { userId: newUser._id, isAdmin: newUser.isAdmin },
+      { userId: user._id, isAdmin: user.isAdmin },
       process.env.JWT_SECRET
     );
 
-    res.status(201).json( {
+    res.status(200).json({
+      message: "Email verified successfully",
       token,
       user: {
-        _id: newUser._id,
-      fullName: fullName,
-      email: email,
-      isAdmin: newUser.isAdmin,
-      profilePhoto: newUser.profilePhoto ? newUser.profilePhoto : null,
-  }});
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        profilePhoto: user.profilePhoto ? user.profilePhoto : null,
+      },
+    });
   } catch (error) {
-    console.log(error);
-    next();
+    console.error("Error in verifySignupController:", error);
+    next(errorHandler(500, "Internal Server Error"));
+  }
+};
+
+// New controller to resend OTP for signup verification
+const resendOTPSignup = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    console.log("email" ,email);
+    if (!email) {
+      return next(errorHandler(400, "Email is required"));
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return next(errorHandler(404, "User not found"));
+    }
+
+    if (user.isVerified) {
+      return next(errorHandler(400, "User is already verified"));
+    }
+
+    const otp = user.generateOtp();
+    await user.save();
+
+    await sendEmail({
+      email: email,
+      subject: "New Verification Code",
+      message: verifyCodeEmailTemp
+        .replace("{{user.name}}", user.fullName)
+        .replace("{{otp}}", otp),
+      attachments: [],
+    });
+
+    res.status(200).json({ message: "New OTP sent successfully", email });
+  } catch (error) {
+    console.error("Error in resendOTPSignupController:", error);
+    next(errorHandler(500, "Internal Server Error"));
   }
 };
 
@@ -345,5 +514,7 @@ export default {
   verifyCode,
   changedPassword,
   resendOTP,
-  adminLoginController
+  adminLoginController,
+  verifySignup,
+  resendOTPSignup
 };
