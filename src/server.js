@@ -53,7 +53,7 @@ app.use((error, req, res, next) => {
 
 //SECTION -  =============================== Port ===================================
 
-server.listen(3000, () => console.log("🚀 Server running at http://localhost:3000"));
+server.listen(3000,'0.0.0.0', () => console.log("🚀 Server running at http://localhost:3000"));
 
 
 app.listen(5000,'0.0.0.0', () => {

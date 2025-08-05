@@ -1,7 +1,7 @@
   import { v2 as cloudinary } from "cloudinary";
   import Product from "../model/product.model.js";
   import { errorHandler } from "../utils/errorHandler.js";
-  import fs from "fs";
+  import fs, { unlink } from "fs";
   import path from "path"
   import { fileURLToPath } from 'url';
   import { dirname } from 'path';
@@ -24,7 +24,7 @@ const __dirname = dirname(__filename);
       description,
       reviews,
       category,
-      location,
+      // location,
       price,
       hot,
       featured,
@@ -52,14 +52,39 @@ const __dirname = dirname(__filename);
       })
     );
 
+    
+    // Handle video uploads (up to 2 videos)
+     const video1 = req.files.video1 && req.files.video1[0];
+    const video2 = req.files.video2 && req.files.video2[0];
+
+    const videos = [video1, video2].filter(Boolean);
+
+
+    let videoUrl = [];
+    if(videos.length > 0){
+      videoUrl = await Promise.all(
+        videos.map(async (item) => {
+          const result = await cloudinary.uploader.upload(item.path, {
+            resource_type: "video",// IMPORTANT: Safety resource_type as "video"
+            folder: "Product videos" // A separate folder for videos
+          });
+          // After upload delete the local file
+          await unlinkAsync(item.path);
+          return result.secure_url;
+        })
+      )
+    }
+
+
     // Construct product data
     const productData = {
       userId: req.userId,
       title,
       image: imageUrl,
+      video: videoUrl,
       description,
       reviews,
-      location,
+      // location,
       price,
       category,
       hot,
@@ -88,8 +113,20 @@ const __dirname = dirname(__filename);
       product,
     });
   } catch (error) {
-    console.log("Error in Create Product", error);
-    next(errorHandler(500, "Failed to create product"));
+   //Ensure local files are dekted even if-cloudinary upload fails
+   if(req.files){
+    const allFiles = [
+      req.files.image1, req.files.image2, req.files.image3, req.files.image4, req.files.image5, req.files.video1, req.files.video2
+    ].flat().filter(Boolean); // Flatten and filter out nulls
+    for (const file of allFiles) {
+      if (file && file.path) {
+        await unlinkAsync(file.path).catch(unlinkErr => console.error("Failed to delete local file", unlinkErr));
+      }
+    }
+   }
+   console.log("Error in craete Product", error);
+   next(errorHandler(500, "Failed to create product"));
+
   }
 };
 
@@ -117,6 +154,7 @@ const createProductByCSV = async (req, res, next) => {
           userId: userId,
           title: data.title,
           image: data.image ? data.image.split(',').map(url => url.trim()) : [],
+          video: data.video ? data.video.split(',').map(url => url.trim()) : [],
           category: data.category,
           description: data.description,
           reviews: data.reviews,
@@ -238,99 +276,133 @@ const createProductByCSV = async (req, res, next) => {
 
 
   
+
 const updateProduct = async (req, res, next) => {
-  try {
-    const {
-      title,
-      description,
-      reviews,
-      category,
-      location,
-      price,
-      hot,
-      featured,
-      newArrival,
-      bidProduct,     // 👈 updated or added from frontend
-      bidtimer        // 👈 updated or added if bidProduct is true
-    } = req.body;
+    // Array to keep track of local file paths for cleanup
+    const filesToUnlink = [];
 
-    const existingProduct = await Product.findById(req.params.productId);
-    if (!existingProduct) {
-      return next(errorHandler(403, "Product not found"));
-    }
+    try {
+        const {
+            title,
+            description,
+            reviews,
+            category,
+            location,
+            price,
+            hot,
+            featured,
+            newArrival,
+            bidProduct,
+            bidtimer,
+            // These come as JSON strings from the frontend
+            existingImageUrls,
+            existingVideoUrls,
+        } = req.body;
 
-    // Upload updated images
-    const uploadedImages = [
-      req.files?.image1?.[0],
-      req.files?.image2?.[0],
-      req.files?.image3?.[0],
-      req.files?.image4?.[0],
-      req.files?.image5?.[0],
-    ];
+        const productId = req.params.productId;
+        const existingProduct = await Product.findById(productId);
 
-    let finalImageUrls = [...(existingProduct.image || [])];
-
-    for (let i = 0; i < uploadedImages.length; i++) {
-      const file = uploadedImages[i];
-      if (file) {
-        const result = await cloudinary.uploader.upload(file.path, {
-          resource_type: "image",
-          folder: "product_images",
-        });
-
-        if (finalImageUrls[i]) {
-          finalImageUrls[i] = result.secure_url;
-        } else {
-          finalImageUrls.push(result.secure_url);
+        if (!existingProduct) {
+            return next(errorHandler(404, "Product not found"));
         }
-      }
+
+        // Parse existing URLs sent from frontend
+        let finalImageUrls = existingImageUrls ? JSON.parse(existingImageUrls) : [];
+        let finalVideoUrls = existingVideoUrls ? JSON.parse(existingVideoUrls) : [];
+
+        // --- Handle Image Uploads ---
+        const uploadedImages = [
+            req.files?.image1?.[0],
+            req.files?.image2?.[0],
+            req.files?.image3?.[0],
+            req.files?.image4?.[0],
+            req.files?.image5?.[0],
+        ].filter(Boolean); // Filter out null/undefined entries
+
+        for (const file of uploadedImages) {
+            filesToUnlink.push(file.path); // Add to cleanup list
+            const result = await cloudinary.uploader.upload(file.path, {
+                resource_type: "image",
+                folder: "product_images", // Consistent folder name
+            });
+            finalImageUrls.push(result.secure_url);
+        }
+
+        // --- Handle Video Uploads ---
+        const uploadedVideos = [
+            req.files?.video1?.[0],
+            req.files?.video2?.[0],
+        ].filter(Boolean); // Filter out null/undefined entries
+
+        for (const file of uploadedVideos) {
+            filesToUnlink.push(file.path); // Add to cleanup list
+            const result = await cloudinary.uploader.upload(file.path, {
+                resource_type: "video", // IMPORTANT: Specify resource_type as "video"
+                folder: "product_videos", // Separate folder for videos
+            });
+            finalVideoUrls.push(result.secure_url);
+        }
+
+        // Prepare update fields
+        const updateData = {
+            title: title || existingProduct.title,
+            description: description || existingProduct.description,
+            reviews: reviews || existingProduct.reviews,
+            category: category || existingProduct.category,
+            location: location || existingProduct.location,
+            price: price || existingProduct.price,
+            hot: hot === 'true' ? true : (hot === 'false' ? false : existingProduct.hot), // Handle boolean string conversion
+            featured: featured === 'true' ? true : (featured === 'false' ? false : existingProduct.featured),
+            newArrival: newArrival === 'true' ? true : (newArrival === 'false' ? false : existingProduct.newArrival),
+            image: finalImageUrls, // Update with new and retained image URLs
+            video: finalVideoUrls, // Update with new and retained video URLs
+            date: Date.now(), // Update modification date
+        };
+
+        // Handle bidProduct and bidtimer logic
+        if (bidProduct === "true" || bidProduct === true) {
+            if (!bidtimer) {
+                return next(errorHandler(400, "Please provide a bid timer for bid products."));
+            }
+            updateData.bidProduct = true;
+            updateData.bidtimer = new Date(bidtimer);
+            updateData.productUnable = false; // Reset to false when bidding is active
+        } else if (bidProduct === "false" || bidProduct === false) {
+            // If bidProduct is explicitly set to false, clear bidding-related fields
+            updateData.bidProduct = false;
+            updateData.bidtimer = null;
+            updateData.productUnable = false; // Product is not bid-enabled, so not 'unable' due to bid timer
+        } else {
+            // If bidProduct is not provided in the request, retain existing value
+            updateData.bidProduct = existingProduct.bidProduct;
+            updateData.bidtimer = existingProduct.bidtimer;
+            updateData.productUnable = existingProduct.productUnable;
+        }
+
+        const updatedProduct = await Product.findByIdAndUpdate(
+            productId,
+            updateData,
+            { new: true, runValidators: true } // Return the updated document and run schema validators
+        );
+
+        // Delete local temporary files after successful processing
+        for (const filePath of filesToUnlink) {
+            await unlinkAsync(filePath).catch(err => console.error(`Failed to delete local file ${filePath}:`, err));
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Product updated successfully",
+            updatedProduct,
+        });
+    } catch (error) {
+        // Ensure local files are deleted even if an error occurs during processing
+        for (const filePath of filesToUnlink) {
+            await unlinkAsync(filePath).catch(err => console.error(`Failed to delete local file ${filePath} during error handling:`, err));
+        }
+        console.error("Error in update product:", error);
+        next(errorHandler(500, "Product update failed"));
     }
-
-    // Prepare update fields
-    const updateData = {
-      title: title || existingProduct.title,
-      image: finalImageUrls,
-      description: description || existingProduct.description,
-      reviews: reviews || existingProduct.reviews,
-      category: category || existingProduct.category,
-      location: location || existingProduct.location,
-      price: price || existingProduct.price,
-      hot: hot ?? existingProduct.hot,
-      featured: featured ?? existingProduct.featured,
-      newArrival: newArrival ?? existingProduct.newArrival,
-      date: Date.now(),
-    };
-
-    // If bidding enabled
-    if (bidProduct === "true" || bidProduct === true) {
-      if (!bidtimer) {
-        return next(errorHandler(400, "Please provide a bid timer"));
-      }
-      updateData.bidProduct = true;
-      updateData.bidtimer = new Date(bidtimer);
-      updateData.productUnable = false;
-    } else if (bidProduct === "false" || bidProduct === false) {
-      // Clear bidding-related fields
-      updateData.bidProduct = false;
-      updateData.bidtimer = null;
-      updateData.productUnable = false;
-    }
-
-    const updatedProduct = await Product.findByIdAndUpdate(
-      req.params.productId,
-      updateData,
-      { new: true }
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Product updated successfully",
-      updatedProduct,
-    });
-  } catch (error) {
-    console.error("Error in update product:", error);
-    next(errorHandler(500, "Product update failed"));
-  }
 };
 
 

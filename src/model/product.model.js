@@ -15,6 +15,11 @@ const productSchema  = new mongoose.Schema({
         type: Array,
         required: true
     },
+    video: {
+        type: Array, 
+        required: false,
+        default: [],
+    },
     description: {
         type: String,
         requird:  true,
@@ -44,10 +49,10 @@ const productSchema  = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    location: {
-        type: String,
-        required: true,
-    },
+    // location: {
+    //     type: String,
+    //     required: true,
+    // },
     bid:{
         type: mongoose.Schema.Types.ObjectId,
     },

@@ -16,6 +16,8 @@ router.post("/create-product",verifyUser,isAdmin,upload.fields([
     {name: "image3", maxCount: 1},
     {name: "image4", maxCount: 1},
     {name: "image5", maxCount: 1},
+    {name: "video1", maxCount: 1},// Added video1
+    {name: "video2", maxCount: 1} // Added video2
 ]),ProductController.createProduct)
 
 //SECTION - CRAETE PRODUCT BY CSV
@@ -33,6 +35,8 @@ router.put("/update-product/:productId",verifyUser,isAdmin,upload.fields([
     {name: "image3", maxCount: 1},
     {name: "image4", maxCount: 1},
     {name: "image5", maxCount: 1},
+     {name: "video1", maxCount: 1},// Added video1
+    {name: "video2", maxCount: 1} // Added video2
 ]), ProductController.updateProduct);
 //DELETE PORDUCT
 router.delete("/delete-product/:productId",verifyUser,isAdmin,ProductController.deleteProduct)
